@@ -4,10 +4,16 @@ const Os = require('os')
 const Path = require('path')
 const pull = require('pull-stream')
 const { promisify } = require('util')
-const { PROTOCOL } = require('./constants')
+const { PROTOCOL, HASBOT, JOYPORT } = require('./constants')
 const Inquirer = require('inquirer')
 const keypress = require('keypress')
 const pushable = require('pull-pushable')
+
+const { EventBus } = require('light-event-bus')
+const dbg = require('debug')('ipfsCat:catClient')
+
+const five = require('johnny-five')
+const miniBus = new EventBus()
 
 const REPO_DIR = Path.join(Os.homedir(), '.ipfs-catremote-client')
 
@@ -57,7 +63,6 @@ async function main (options) {
     }
 
     console.log('(Use the arrow keys to control the lazer, hit "q" to quit)')
-
     try {
       await new Promise((resolve, reject) => {
         keypress(process.stdin)
@@ -68,7 +73,9 @@ async function main (options) {
           pusher.push(Buffer.from(JSON.stringify(key)))
           if (key.name === 'q') pusher.end()
         }
-
+        miniBus.subscribe('pos', async arg => {
+          pusher.push(Buffer.from(JSON.stringify(arg)))
+        })
         process.stdin.on('keypress', onKeypress)
         process.stdin.setRawMode(true)
         process.stdin.resume()
@@ -91,4 +98,38 @@ async function main (options) {
   }
 }
 
+function makeBot () {
+  const opts = {}
+  if (JOYPORT) opts.port = JOYPORT
+  const board = new five.Board(opts)
+
+  board.on('ready', function () {
+    console.log('🕹 is ready')
+
+    // Create a new `joystick` hardware instance.
+    var joystick = new five.Joystick({
+    //   [ x, y ]
+      pins: ['A0', 'A1']
+    })
+
+    // main()
+
+    joystick.on('change', async function () {
+    // console.log('Joystick');
+    // console.log('  x : ', this.x);
+    // console.log('  y : ', this.y);
+      const { x, y } = this
+      // console.log('--------------------------------------');
+      if (x > 0.1 || y > 0.1 || x < -0.1 || y < -0.1) {
+        dbg(x, y)
+        miniBus.publish('pos', [x, y])
+      }
+    })
+  })
+  return board
+}
+
 main()
+
+if (HASBOT) makeBot()
+else console.log('🕹 need more 🤖')
